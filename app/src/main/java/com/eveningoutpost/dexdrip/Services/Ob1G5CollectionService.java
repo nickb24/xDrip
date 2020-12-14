@@ -2029,7 +2029,7 @@ public class Ob1G5CollectionService extends G5BaseService {
             if (vr != null && FirmwareCapability.isFirmwareTemperatureCapable(vr.firmware_version_string)) {
                 l.add(new StatusItem("Temperature", bt.temperature + " \u2103"));
             }
-            if(bt.resist !=0) {
+            if (bt.resist !=0) {
                 l.add(new StatusItem("Resistance", bt.resist, bt.resist > 1400 ? BAD : (bt.resist > 1000 ? NOTICE : (bt.resist > 750 ? NORMAL : Highlight.GOOD))));
             }
         }
