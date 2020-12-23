@@ -701,9 +701,9 @@ public class Ob1G5StateMachine {
 
     private static void glucoseRxCommon(final BaseGlucoseRxMessage glucose, final Ob1G5CollectionService parent, final RxBleConnection connection) {
         if (JoH.ratelimit("ob1-g5-also-read-raw", 20)) {
-            //if (FirmwareCapability.isTransmitterRawCapable(getTransmitterID())) {
+            if (FirmwareCapability.isTransmitterRawCapable(getTransmitterID())) {
                 enqueueUniqueCommand(new SensorTxMessage(), "Also read raw");
-          //  }
+            }
         }
 
         if (JoH.pratelimit("g5-tx-time-since", 7200)
