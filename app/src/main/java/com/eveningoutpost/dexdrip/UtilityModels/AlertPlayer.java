@@ -532,7 +532,7 @@ public class AlertPlayer {
                 float volumeFrac = (float) (minsFromStartPlaying - MAX_VIBRATING_MINUTES) / (MAX_ASCENDING_MINUTES - MAX_VIBRATING_MINUTES);
                 volumeFrac = Math.min(volumeFrac, 1);
                 if (profile == ALERT_PROFILE_MEDIUM) {
-                    volumeFrac = (float) 0.7;
+                    volumeFrac = (float) 0.5;
                 }
                 Log.d(TAG, "VibrateNotifyMakeNoise volumeFrac = " + volumeFrac);
                 boolean overrideSilent = alert.override_silent_mode;
