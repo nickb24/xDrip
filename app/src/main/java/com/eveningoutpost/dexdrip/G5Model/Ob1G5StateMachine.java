@@ -606,6 +606,8 @@ public class Ob1G5StateMachine {
                             final EGlucoseRxMessage eglucose = (EGlucoseRxMessage) data_packet.msg;
                             parent.processCalibrationState(eglucose.calibrationState());
 
+                            checkVersionAndBattery(parent, connection);
+
                             if (eglucose.usable()) {
                                 parent.msg("Got G6 glucose");
                             } else {
