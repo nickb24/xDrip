@@ -707,7 +707,9 @@
         <service android:name=".insulin.inpen.InPenService"
             android:foregroundServiceType="connectedDevice|location"
             />
-        <service android:name=".cgm.sharefollow.ShareFollowService" />
+        <service android:name=".cgm.sharefollow.ShareFollowService"
+            android:foregroundServiceType="connectedDevice|location"
+            />
 
         <activity
             android:name=".EventLogActivity"
