@@ -5,7 +5,7 @@ buildscript {
     }
 
     dependencies {
-        if (getGradle().getStartParameter().getTaskRequests().toString().contains("Release]")) {
+        if (getGradle().getStartParameter().getTaskRequests().toString().endsWith("Release")) {
             println("Enabling New Relic")
             classpath "com.newrelic.agent.android:agent-gradle-plugin:5.27.1"
         }
@@ -19,7 +19,7 @@ if (project.file('local.gradle').exists()) {
 }
 
 
-if (getGradle().getStartParameter().getTaskRequests().toString().contains("Release]")) {
+if (getGradle().getStartParameter().getTaskRequests().toString().endsWith("Release")) {
     apply plugin: 'newrelic'
     newrelic {
         variantMapsEnabled false
@@ -310,7 +310,7 @@ dependencies {
     implementation 'com.squareup.retrofit:converter-gson:2.0.0-beta2'
     implementation 'com.getpebble:pebblekit:3.1.0'
     implementation 'com.github.jamorham:amazfitcommunication:master-SNAPSHOT'
-    implementation "io.reactivex.rxjava2:rxjava:2.2.20"
+    implementation 'io.reactivex:rxjava:1.3.3'
     implementation 'com.activeandroid:thread-safe-active-android:3.1.1'
     //implementation 'com.github.lecho:hellocharts-android:v1.5.8'
     implementation "com.polidea.rxandroidble2:rxandroidble:1.11.1"
