@@ -920,7 +920,7 @@
     <string name="other">Otros</string>
     <string name="which_software_is_the_wixel_running">¿Qué software esta ejecutando el Wixel?</string>
     <string name="start_source_setup_wizard">Iniciar Asistente Origen Datos</string>
-    <string name="hour_format">%s Hora</string>
+    <string name="hour_format">%s Horas</string>
     <string name="enter_your_transmitter_id_exactly">Introduzca la ID del transmisor exactamente como está impresa</string>
     <string name="which_type_of_device">¿Qué tipo de dispositivo?</string>
     <string name="enable_local_broadcast">¿Habilitar emisión local?</string>
