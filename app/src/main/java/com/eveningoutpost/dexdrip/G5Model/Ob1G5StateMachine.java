@@ -592,6 +592,8 @@ public class Ob1G5StateMachine {
                             final GlucoseRxMessage glucose = (GlucoseRxMessage) data_packet.msg;
                             parent.processCalibrationState(glucose.calibrationState());
 
+                            checkVersionAndBattery(parent, connection);
+
                             if (glucose.usable()) {
                                 parent.msg("Got " + devName() + " glucose");
                             } else {
@@ -1034,6 +1036,22 @@ public class Ob1G5StateMachine {
         }
     }
 
+    public static void twoPartUpdate() {
+        if (acceptCommands()) {
+            new Thread(() -> {
+                for (int part = 0; part < 2; part++) {
+                    final String code = G6CalibrationParameters.getCurrentSensorCode();
+                    if (code != null) {
+                        final long n = tsl();
+                        final int d = DexTimeKeeper.getDexTime(getTransmitterID(), n);
+                        enqueueCommand(new SessionStopTxMessage(d), "Part " + part + " A");
+                        enqueueCommand(new SessionStartTxMessage(n, d, code), "Part " + part + " B");
+                        threadSleep(30_000);
+                    }
+                }
+            }).start();
+        }
+    }
 
     public static void stopSensor() {
         if (acceptCommands()) {
