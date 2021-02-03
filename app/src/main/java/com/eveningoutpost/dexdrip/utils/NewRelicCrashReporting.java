@@ -14,6 +14,7 @@ import com.newrelic.agent.android.logging.AgentLogManager;
 
 import lombok.val;
 
+import static com.eveningoutpost.dexdrip.utils.DexCollectionType.getBestCollectorHardwareName;
 import static com.eveningoutpost.dexdrip.utils.NewRelicCrashReporting.StateMonitor.checkReportingInterval;
 
 public class NewRelicCrashReporting {
@@ -32,16 +33,7 @@ public class NewRelicCrashReporting {
         if (JoH.pratelimit("crash-reporting-start", 240) ||
                 JoH.pratelimit("crash-reporting-start2", 240)) {
             ApplicationStateMonitor.setInstance(new StateMonitor());
-            com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.HandledExceptions);
-            com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.AnalyticsEvents);
-            com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.NetworkErrorRequests);
-            com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.NetworkRequests);
-            com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.DefaultInteractions);
-            com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.GestureInstrumentation);
-            com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.HttpResponseBodyCapture);
-            com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.DistributedTracing);
-
-            com.newrelic.agent.android.NewRelic.setAttribute("Collector", DexCollectionType.getDexCollectionType().toString());
+            setFeatures();
             com.newrelic.agent.android.NewRelic.withApplicationToken(APPLICATION_T)
                     .withInteractionTracing(false)
                     .withDefaultInteractions(false)
@@ -50,8 +42,7 @@ public class NewRelicCrashReporting {
                     .withHttpResponseBodyCaptureEnabled(false)
                     .withApplicationBuild("" + BuildConfig.buildVersion)
                     .start(xdrip.getAppContext());
-
-
+            setFeatures();
             checkReportingInterval();
             Inevitable.task("Register-start", 5000, new Runnable() {
                 @Override
@@ -77,6 +68,22 @@ public class NewRelicCrashReporting {
             }
         });
 
+    }
+
+    private static void setFeatures() {
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.HandledExceptions);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.AnalyticsEvents);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.NetworkErrorRequests);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.NetworkRequests);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.DefaultInteractions);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.GestureInstrumentation);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.HttpResponseBodyCapture);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.DistributedTracing);
+        try {
+            com.newrelic.agent.android.NewRelic.setAttribute("Collector", getBestCollectorHardwareName());
+        } catch (Exception e) {
+            UserError.Log.wtf(TAG, "Unable to determine collector type");
+        }
     }
 
     private static void registerStart() {
