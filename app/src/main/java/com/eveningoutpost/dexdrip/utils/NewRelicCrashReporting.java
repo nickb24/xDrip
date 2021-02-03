@@ -86,6 +86,22 @@ public class NewRelicCrashReporting {
         }
     }
 
+    private static void setFeatures() {
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.HandledExceptions);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.AnalyticsEvents);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.NetworkErrorRequests);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.NetworkRequests);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.DefaultInteractions);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.GestureInstrumentation);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.HttpResponseBodyCapture);
+        com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.DistributedTracing);
+        try {
+            com.newrelic.agent.android.NewRelic.setAttribute("Collector", getBestCollectorHardwareName());
+        } catch (Exception e) {
+            UserError.Log.wtf(TAG, "Unable to determine collector type");
+        }
+    }
+
     private static void registerStart() {
         ApplicationStateMonitor.getInstance().activityStarted();
     }
