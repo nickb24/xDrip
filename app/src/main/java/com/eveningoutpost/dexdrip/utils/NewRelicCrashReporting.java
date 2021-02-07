@@ -4,6 +4,7 @@ import com.eveningoutpost.dexdrip.BuildConfig;
 import com.eveningoutpost.dexdrip.Models.JoH;
 import com.eveningoutpost.dexdrip.Models.UserError;
 import com.eveningoutpost.dexdrip.UtilityModels.Inevitable;
+import com.eveningoutpost.dexdrip.UtilityModels.PersistentStore;
 import com.eveningoutpost.dexdrip.xdrip;
 import com.newrelic.agent.android.FeatureFlag;
 import com.newrelic.agent.android.background.ApplicationStateMonitor;
@@ -28,7 +29,8 @@ public class NewRelicCrashReporting {
             return;
         }
         started = true;
-        if (JoH.pratelimit("crash-reporting-start", 240)) {
+        if (JoH.pratelimit("crash-reporting-start", 240) ||
+                JoH.pratelimit("crash-reporting-start2", 240)) {
             ApplicationStateMonitor.setInstance(new StateMonitor());
             com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.HandledExceptions);
             com.newrelic.agent.android.NewRelic.disableFeature(FeatureFlag.AnalyticsEvents);
@@ -64,6 +66,17 @@ public class NewRelicCrashReporting {
                 UserError.Log.wtf(TAG, "Unable to start crash reporter as app is restarting too frequently");
             }
         }
+        Inevitable.task("Commit-start", 100, new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    PersistentStore.commit();
+                } catch (Exception e) {
+                    //
+                }
+            }
+        });
+
     }
 
     private static void registerStart() {
