@@ -68,6 +68,7 @@ public class NewRelicCrashReporting {
             }
         });
 
+<<<<<<< HEAD
     }
 
     private static void setFeatures() {
@@ -84,6 +85,8 @@ public class NewRelicCrashReporting {
         } catch (Exception e) {
             UserError.Log.wtf(TAG, "Unable to determine collector type");
         }
+=======
+>>>>>>> d56abf4ed... Crash reporting work around package manager double trigger
     }
 
     private static void setFeatures() {
