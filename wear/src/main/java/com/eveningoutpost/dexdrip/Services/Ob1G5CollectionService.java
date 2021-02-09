@@ -54,6 +54,7 @@ import com.eveningoutpost.dexdrip.ui.helpers.Span;
 import com.eveningoutpost.dexdrip.utils.DexCollectionType;
 import com.eveningoutpost.dexdrip.utils.bt.Subscription;
 import com.eveningoutpost.dexdrip.utils.framework.WakeLockTrampoline;
+import com.eveningoutpost.dexdrip.watch.thinjam.BlueJayEntry;
 import com.eveningoutpost.dexdrip.xdrip;
 import com.google.common.collect.Sets;
 import com.polidea.rxandroidble2.RxBleClient;
@@ -93,6 +94,8 @@ import static com.eveningoutpost.dexdrip.G5Model.Ob1G5StateMachine.pendingCalibr
 import static com.eveningoutpost.dexdrip.G5Model.Ob1G5StateMachine.pendingStart;
 import static com.eveningoutpost.dexdrip.G5Model.Ob1G5StateMachine.pendingStop;
 import static com.eveningoutpost.dexdrip.G5Model.Ob1G5StateMachine.usingAlt;
+import static com.eveningoutpost.dexdrip.Models.JoH.niceTimeScalar;
+import static com.eveningoutpost.dexdrip.Models.JoH.tsl;
 import static com.eveningoutpost.dexdrip.Services.Ob1G5CollectionService.STATE.BOND;
 import static com.eveningoutpost.dexdrip.Services.Ob1G5CollectionService.STATE.CLOSE;
 import static com.eveningoutpost.dexdrip.Services.Ob1G5CollectionService.STATE.CLOSED;
@@ -162,17 +165,18 @@ public class Ob1G5CollectionService extends G5BaseService {
     private static RxBleClient rxBleClient;
     private static volatile PendingIntent pendingIntent;
 
-    private static String transmitterID;
+    private static volatile String transmitterID;
     private static volatile String transmitterMAC;
     private static volatile String historicalTransmitterMAC;
     private static String transmitterIDmatchingMAC;
 
-    private static String lastScanError = null;
-    public static String lastSensorStatus = null;
-    public static CalibrationState lastSensorState = null;
+    private static volatile String lastScanError = null;
+    private static volatile int lastScanException = -1;
+    public static volatile String lastSensorStatus = null;
+    public static volatile CalibrationState lastSensorState = null;
     public static volatile long lastUsableGlucosePacketTime = 0;
     private static volatile String static_connection_state = null;
-    private static long static_last_connected = 0;
+    private static volatile long static_last_connected = 0;
     @Setter
     private static long last_transmitter_timestamp = 0;
     private static long lastStateUpdated = 0;
@@ -187,8 +191,8 @@ public class Ob1G5CollectionService extends G5BaseService {
     public static boolean android_wear = false;
     public static boolean wear_broadcast = false;
 
-    private Subscription scanSubscription;
-    private Subscription connectionSubscription;
+    private static volatile Subscription scanSubscription;
+    private static volatile Subscription connectionSubscription;
     private static volatile Subscription stateSubscription;
     private Subscription discoverSubscription;
     private RxBleDevice bleDevice;
@@ -200,12 +204,13 @@ public class Ob1G5CollectionService extends G5BaseService {
     private PowerManager.WakeLock fullWakeLock;
 
     private volatile boolean background_launch_waiting = false;
-    private static long last_scan_started = -1;
+    private static volatile long last_scan_started = -1;
     private static volatile long last_connect_started = -1;
+    private static volatile long last_mega_status_read = -1;
     private static int error_count = 0;
     private static int connectNowFailures = 0;
     private static int connectFailures = 0;
-    private static int scanTimeouts = 0;
+    private static volatile int scanTimeouts = 0;
     private static boolean lastConnectFailed = false;
     private static boolean preScanFailureMarker = false;
     private static boolean auth_succeeded = false;
@@ -219,7 +224,7 @@ public class Ob1G5CollectionService extends G5BaseService {
     private static volatile boolean minimize_scanning = false; // set by preference
     private static volatile boolean always_scan = false;
     private static volatile boolean scan_next_run = true;
-    private static boolean always_discover = false;
+    private static boolean always_discover = true;
     private static boolean always_connect = false;
     private static boolean do_discovery = true;
     private static final boolean do_auth = true;
@@ -240,6 +245,7 @@ public class Ob1G5CollectionService extends G5BaseService {
         CHECK_AUTH("Checking Auth"),
         PREBOND("Bond Prepare"),
         BOND("Bonding"),
+        UNBOND("UnBonding"),
         RESET("Reseting"),
         GET_DATA("Getting Data"),
         CLOSE("Sleeping"),
@@ -314,11 +320,15 @@ public class Ob1G5CollectionService extends G5BaseService {
                             UserError.Log.d(TAG, "Skipping Scanning! : Changing state due to minimize_scanning flags");
                             changeState(CONNECT_NOW);
                         } else {
+                           /* if ((Build.VERSION.SDK_INT >= 29) && (Pref.getBooleanDefaultFalse("ob1_android10workaround"))) {
+                                UserError.Log.d(TAG, "Attempting Android 10+ workaround unbonding");
+                                unbondIfAllowed();
+                            }*/
                             scan_for_device();
                         }
                         break;
                     case CONNECT_NOW:
-                        connect_to_device(false);
+                        connect_to_device(true);
                         break;
                     case CONNECT:
                         connect_to_device(true);
@@ -363,6 +373,11 @@ public class Ob1G5CollectionService extends G5BaseService {
                         }
                         create_bond();
                         break;
+                    case UNBOND:
+                        UserError.Log.d(TAG, "Unbond state - not yet implemented");
+                        //Ob1G5StateMachine.doUnBond(this, connection);
+                        break;
+
                     case RESET:
                         UserError.Log.d(TAG, "Entering hard reset state");
                         Ob1G5StateMachine.doReset(this, connection);
@@ -370,6 +385,7 @@ public class Ob1G5CollectionService extends G5BaseService {
                     case GET_DATA:
                         if (hardResetTransmitterNow) {
                             send_reset_command();
+                            DexSyncKeeper.clear(transmitterID);
                         } else {
                             final PowerManager.WakeLock linger_wl_get_data = JoH.getWakeLock("jam-g5-get-linger", 6000);
                             if (!Ob1G5StateMachine.doGetData(this, connection)) resetState();
@@ -400,7 +416,11 @@ public class Ob1G5CollectionService extends G5BaseService {
             estimateAnticipateFromLinkedData();
             alwaysMinimize = !preScanFailureMarker;
         }
-        return minimize_scanning && transmitterMAC != null && (!lastConnectFailed || (modulo == 1) || alwaysMinimize) && (DexSyncKeeper.isReady(transmitterID));
+        //if (!alwaysMinimize) {
+        // alwaysMinimize = Pref.getBooleanDefaultFalse("ob1_avoid_scanning"); // TODO this maybe should be removed now
+        // }
+        return minimize_scanning && transmitterMAC != null && (!lastConnectFailed || (modulo == 1) || alwaysMinimize)
+                && (DexSyncKeeper.isReady(transmitterID));
     }
 
     private void estimateAnticipateFromLinkedData() {
@@ -466,14 +486,15 @@ public class Ob1G5CollectionService extends G5BaseService {
             if (always_scan || scan_next_run || (transmitterMAC == null) || (!transmitterID.equals(transmitterIDmatchingMAC)) || (static_last_timestamp < 1)) {
                 scan_next_run = false; // reset if set
                 transmitterMAC = null; // reset if set
-                last_scan_started = JoH.tsl();
+                last_scan_started = tsl();
                 scanWakeLock = JoH.getWakeLock("xdrip-jam-g5-scan", (int) Constants.MINUTE_IN_MS * 7);
 
 
                 historicalTransmitterMAC = PersistentStore.getString(OB1G5_MACSTORE + transmitterID); // "" if unset
 
                 ScanFilter filter;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && historicalTransmitterMAC.length() > 5) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && historicalTransmitterMAC.length() > 5
+                        && Build.VERSION.SDK_INT < 29) {
                     filter = new ScanFilter.Builder()
                             .setDeviceAddress(historicalTransmitterMAC)
                             .build();
@@ -486,6 +507,11 @@ public class Ob1G5CollectionService extends G5BaseService {
                     }
                 }
 
+                if (lastScanException == BleScanException.LOCATION_PERMISSION_MISSING) {
+                    UserError.Log.d(TAG, "Clearing location permission error as we will get it again when we scan now if it is still a problem");
+                    lastScanException = -1;
+                    lastScanError = null;
+                }
 
                 scanSubscription = new Subscription(rxBleClient.scanBleDevices(
                         new ScanSettings.Builder()
@@ -524,7 +550,8 @@ public class Ob1G5CollectionService extends G5BaseService {
 
     private void stopScanWithTimeoutAndReschedule() {
         stopScan();
-        UserError.Log.d(TAG, "Stopped scan due to timeout at: " + JoH.dateTimeText(JoH.tsl()));
+        UserError.Log.d(TAG, "Stopped scan due to timeout at: " + JoH.dateTimeText(tsl()));
+        //noinspection NonAtomicOperationOnVolatileField
         scanTimeouts++;
         tryLoadingSavedMAC();
         prepareToWakeup();
@@ -539,6 +566,13 @@ public class Ob1G5CollectionService extends G5BaseService {
             }
             final String localTransmitterMAC = transmitterMAC;
             if (localTransmitterMAC != null) {
+
+                if (inPurdah()) {
+                    msg("Purdah " + niceTimeScalar(purdahMs()));
+                    changeState(CLOSE);
+                    return;
+                }
+
                 msg("Connect request");
                 if (state == CONNECT_NOW) {
                     if (connection_linger != null) JoH.releaseWakeLock(connection_linger);
@@ -559,7 +593,7 @@ public class Ob1G5CollectionService extends G5BaseService {
                                 UserError.Log.wtf(TAG, "Got Error from state subscription: " + throwable);
                             }));
 
-                    last_connect_started = JoH.tsl();
+                    last_connect_started = tsl();
                     // Attempt to establish a connection // TODO does this need different connection timeout for auto vs normal?
                     connectionSubscription = new Subscription(bleDevice.establishConnection(auto)
                             .timeout(7, TimeUnit.MINUTES)
@@ -635,7 +669,7 @@ public class Ob1G5CollectionService extends G5BaseService {
         UserError.Log.d(TAG, "Attempting to create bond, device is : " + (isDeviceLocallyBonded ? "BONDED" : "NOT Bonded"));
 
         if (isDeviceLocallyBonded && getInitiateBondingFlag()) {
-            UserError.Log.d(TAG, "Device is marked as bonded but we are being asked to bond so attempting to unbond first");
+            UserError.Log.e(TAG, "Device is marked as bonded but we are being asked to bond so attempting to unbond first");
             unbondIfAllowed();
             changeState(CLOSE);
         } else {
@@ -705,6 +739,12 @@ public class Ob1G5CollectionService extends G5BaseService {
                     UserError.Log.d(TAG, "Not running due to forced wear");
                 return false;
             }
+
+            if (BlueJayEntry.isPhoneCollectorDisabled()) {
+                UserError.Log.d(TAG,"Not running as BlueJay is collector");
+                return false;
+            }
+
         } else {
             // android wear code
             if (!PersistentStore.getBoolean(CollectionServiceStarter.pref_run_wear_collector))
@@ -810,8 +850,8 @@ public class Ob1G5CollectionService extends G5BaseService {
         if (JoH.ratelimit("g5-wakeup-timer", 5)) {
             final long when = DexSyncKeeper.anticipate(transmitterID);
             if (when > 0) {
-                final long when_offset = when - JoH.tsl();
-                UserError.Log.d(TAG, "(" + JoH.dateTimeText(JoH.tsl()) + ")  Wake up time anticipated at: " + JoH.dateTimeText(when));
+                final long when_offset = when - tsl();
+                UserError.Log.d(TAG, "(" + JoH.dateTimeText(tsl()) + ")  Wake up time anticipated at: " + JoH.dateTimeText(when));
                 scheduleWakeUp(when_offset - Constants.SECOND_IN_MS * 15, "anticipate");
             } else {
                 scheduleWakeUp(Constants.SECOND_IN_MS * 285, "anticipate");
@@ -832,11 +872,11 @@ public class Ob1G5CollectionService extends G5BaseService {
 
     private void scheduleWakeUp(long future, final String info) {
         if (future <= 0) future = 5000;
-        UserError.Log.d(TAG, "Scheduling wakeup @ " + JoH.dateTimeText(JoH.tsl() + future) + " (" + info + ")");
+        UserError.Log.d(TAG, "Scheduling wakeup @ " + JoH.dateTimeText(tsl() + future) + " (" + info + ")");
         if (pendingIntent == null)
-           //pendingIntent = PendingIntent.getService(this, 0, new Intent(this, this.getClass()), 0);
+            //pendingIntent = PendingIntent.getService(this, 0, new Intent(this, this.getClass()), 0);
             pendingIntent = WakeLockTrampoline.getPendingIntent(this.getClass());
-        wakeup_time = JoH.tsl() + future;
+        wakeup_time = tsl() + future;
         JoH.wakeUpIntent(this, future, pendingIntent);
     }
 
@@ -899,7 +939,11 @@ public class Ob1G5CollectionService extends G5BaseService {
             final IntentFilter pairingRequestFilter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
             pairingRequestFilter.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY - 1);
             try {
-                registerReceiver(mPairingRequestRecevier, pairingRequestFilter);
+                if (Build.VERSION.SDK_INT < 29) {
+                    registerReceiver(mPairingRequestRecevier, pairingRequestFilter);
+                } else {
+                    UserError.Log.d(TAG, "Not registering pairing receiver on Android 10+");
+                }
             } catch (Exception e) {
                 UserError.Log.e(TAG, "Could not register pairing request receiver:" + e);
             }
@@ -925,7 +969,7 @@ public class Ob1G5CollectionService extends G5BaseService {
         xdrip.checkAppContext(getApplicationContext());
         final PowerManager.WakeLock wl = JoH.getWakeLock("g5-start-service", 310000);
         try {
-            UserError.Log.d(TAG, "WAKE UP WAKE UP WAKE UP WAKE UP @ " + JoH.dateTimeText(JoH.tsl()));
+            UserError.Log.d(TAG, "WAKE UP WAKE UP WAKE UP WAKE UP @ " + JoH.dateTimeText(tsl()));
             msg("Wake up");
             if (wakeup_time > 0) {
                 wakeup_jitter = JoH.msSince(wakeup_time);
@@ -933,9 +977,9 @@ public class Ob1G5CollectionService extends G5BaseService {
                     UserError.Log.d(TAG, "Woke up Early..");
                 } else {
                     if (wakeup_jitter > 1000) {
-                        UserError.Log.d(TAG, "Wake up, time jitter: " + JoH.niceTimeScalar(wakeup_jitter));
+                        UserError.Log.d(TAG, "Wake up, time jitter: " + niceTimeScalar(wakeup_jitter));
                         if ((wakeup_jitter > TOLERABLE_JITTER) && (!JoH.buggy_samsung) && JoH.isSamsung()) {
-                            UserError.Log.wtf(TAG, "Enabled Buggy Samsung workaround due to jitter of: " + JoH.niceTimeScalar(wakeup_jitter));
+                            UserError.Log.wtf(TAG, "Enabled Buggy Samsung workaround due to jitter of: " + niceTimeScalar(wakeup_jitter));
                             JoH.buggy_samsung = true;
                             PersistentStore.incrementLong(BUGGY_SAMSUNG_ENABLED);
                             max_wakeup_jitter = 0;
@@ -1012,7 +1056,7 @@ public class Ob1G5CollectionService extends G5BaseService {
         try {
             unregisterReceiver(mPairingRequestRecevier);
         } catch (Exception e) {
-            UserError.Log.e(TAG, "Got exception unregistering pairing receiver: " + e);
+            UserError.Log.d(TAG, "Got exception unregistering pairing receiver: " + e);
         }
     }
 
@@ -1095,6 +1139,7 @@ public class Ob1G5CollectionService extends G5BaseService {
     private synchronized void onScanFailure(Throwable throwable) {
 
         if (throwable instanceof BleScanException) {
+            lastScanException = ((BleScanException) throwable).getReason();
             final String info = handleBleScanException((BleScanException) throwable);
             lastScanError = info;
             UserError.Log.d(TAG, info);
@@ -1120,13 +1165,13 @@ public class Ob1G5CollectionService extends G5BaseService {
                         //
                     }
 
-                   if (WholeHouse.isRpi()) {
-                       UserError.Log.e(TAG,"Trying to turn off/on bluetooth");
-                       JoH.niceRestartBluetooth(xdrip.getAppContext());
-                   } else {
-                       UserError.Log.e(TAG, "Trying to Turn Bluetooth on");
-                       JoH.setBluetoothEnabled(xdrip.getAppContext(), true);
-                   }
+                    if (WholeHouse.isRpi()) {
+                        UserError.Log.e(TAG,"Trying to turn off/on bluetooth");
+                        JoH.niceRestartBluetooth(xdrip.getAppContext());
+                    } else {
+                        UserError.Log.e(TAG, "Trying to Turn Bluetooth on");
+                        JoH.setBluetoothEnabled(xdrip.getAppContext(), true);
+                    }
                 }
             }
             // TODO count scan duration
@@ -1179,6 +1224,12 @@ public class Ob1G5CollectionService extends G5BaseService {
         if (state == CONNECT_NOW) {
             connectNowFailures++;
             lastConnectFailed = true;
+
+            if ((connectNowFailures % 12 == 7) && genericBluetoothWatchdog()) {
+                UserError.Log.e(TAG, "Initiating bluetooth watchdog reset");
+                JoH.niceRestartBluetooth(xdrip.getAppContext());
+            }
+
             if (throwable instanceof BleGattCallbackTimeoutException) {
                 if (throwable.getMessage().contains("BleGattOperation{description='CONNECTION_STATE'")) {
                     UserError.Log.d(TAG, "Setting pre-scan failure marker enabled due to exception type");
@@ -1238,7 +1289,7 @@ public class Ob1G5CollectionService extends G5BaseService {
     // We have connected to the device!
     private void onConnectionReceived(RxBleConnection this_connection) {
         msg("Connected");
-        static_last_connected = JoH.tsl();
+        static_last_connected = tsl();
         lastConnectFailed = false;
         preScanFailureMarker = false;
 
@@ -1266,7 +1317,7 @@ public class Ob1G5CollectionService extends G5BaseService {
         switch (newState) {
             case CONNECTING:
                 connection_state = "Connecting";
-                connecting_time = JoH.tsl();
+                connecting_time = tsl();
                 break;
             case CONNECTED:
                 connection_state = "Connected";
@@ -1275,10 +1326,10 @@ public class Ob1G5CollectionService extends G5BaseService {
                 final long since_connecting = JoH.msSince(connecting_time);
                 if ((connecting_time > static_last_timestamp) && (since_connecting > Constants.SECOND_IN_MS * 310) && (since_connecting < Constants.SECOND_IN_MS * 620)) {
                     if (!always_scan) {
-                        UserError.Log.e(TAG, "Connection time shows missed reading, switching to always scan, metric: " + JoH.niceTimeScalar(since_connecting));
+                        UserError.Log.e(TAG, "Connection time shows missed reading, switching to always scan, metric: " + niceTimeScalar(since_connecting));
                         always_scan = true;
                     } else {
-                        UserError.Log.e(TAG, "Connection time shows missed reading, despite always scan, metric: " + JoH.niceTimeScalar(since_connecting));
+                        UserError.Log.e(TAG, "Connection time shows missed reading, despite always scan, metric: " + niceTimeScalar(since_connecting));
                     }
                 }
                 break;
@@ -1334,6 +1385,10 @@ public class Ob1G5CollectionService extends G5BaseService {
 
     private boolean g5BluetoothWatchdog() {
         return Pref.getBoolean("g5_bluetooth_watchdog", true);
+    }
+
+    private boolean genericBluetoothWatchdog() {
+        return Pref.getBoolean("bluetooth_watchdog", true);
     }
 
     public static void updateLast(long timestamp) {
@@ -1472,6 +1527,11 @@ public class Ob1G5CollectionService extends G5BaseService {
                                 weInitiatedBondConfirmation = 2;
                                 changeState(GET_DATA);
                             }
+                        } else if (parcel_device.getBondState() == BluetoothDevice.BOND_BONDING) {
+                            if (Build.VERSION.SDK_INT >= 29) {
+                                JoH.playResourceAudio(R.raw.bt_meter_connect);
+                                UserError.Log.uel(TAG, "Prompting user to notice pairing request with sound - On Android 10+ you have to manually pair when requested");
+                            }
                         }
                     }
                 } catch (Exception e) {
@@ -1544,12 +1604,28 @@ public class Ob1G5CollectionService extends G5BaseService {
     private static final String IS_STARTED = "G5_IS_STARTED";
     private static final String IS_FAILED = "G5_IS_FAILED";
 
-    public static void processCalibrationState(CalibrationState state) {
+    private static volatile long lastProcessCalibrationState;
+
+    public static void processCalibrationState(final CalibrationState state, final long incomingTimestamp) {
+        if (incomingTimestamp > lastProcessCalibrationState) {
+            processCalibrationState(state);
+        } else {
+            UserError.Log.d(TAG, "Ignoring calibration state as it is: " + JoH.dateTimeText(incomingTimestamp) + " vs local: " + JoH.dateTimeText(lastProcessCalibrationState));
+        }
+    }
+
+    public static void processCalibrationState(final CalibrationState state) {
 
         if (state == CalibrationState.Unknown) {
             UserError.Log.d(TAG, "Not processing push of unknown state as this is the unset state");
             return;
         }
+
+        if (JoH.msSince(lastProcessCalibrationState) < Constants.MINUTE_IN_MS) {
+            UserError.Log.d(TAG, "Ignoring duplicate processCalibration State");
+            return;
+        }
+        lastProcessCalibrationState = tsl();
 
         lastSensorStatus = state.getExtendedText();
         lastSensorState = state;
@@ -1580,7 +1656,7 @@ public class Ob1G5CollectionService extends G5BaseService {
             Inevitable.task("ask initial calibration", SECOND_IN_MS * 30, () -> {
                 final PendingIntent pi = PendingIntent.getActivity(xdrip.getAppContext(), G5_CALIBRATION_REQUEST, JoH.getStartActivityIntent(c), PendingIntent.FLAG_UPDATE_CURRENT);
                 // pending intent not used on wear
-                JoH.showNotification(state.getText(), "G5 Calibration Required", android_wear ? null : pi, G5_CALIBRATION_REQUEST, state == CalibrationState.NeedsFirstCalibration, true, false);
+                JoH.showNotification(state.getText(), "Calibration Required", android_wear ? null : pi, G5_CALIBRATION_REQUEST, state == CalibrationState.NeedsFirstCalibration, true, false);
 
             });
         } else if (!needs_calibration && was_needing_calibration) {
@@ -1595,7 +1671,7 @@ public class Ob1G5CollectionService extends G5BaseService {
                     Ob1G5StateMachine.restartSensorWithTimeTravel();
                 } else {
                     UserError.Log.uel(TAG, "Attempting to auto-start sensor");
-                    Ob1G5StateMachine.startSensor(JoH.tsl());
+                    Ob1G5StateMachine.startSensor(tsl());
                 }
                 final PendingIntent pi = PendingIntent.getActivity(xdrip.getAppContext(), G5_SENSOR_RESTARTED, JoH.getStartActivityIntent(Home.class), PendingIntent.FLAG_UPDATE_CURRENT);
                 JoH.showNotification("Auto Start", "Sensor Requesting Restart", pi, G5_SENSOR_RESTARTED, true, true, false);
@@ -1610,7 +1686,7 @@ public class Ob1G5CollectionService extends G5BaseService {
 
         if (is_failed && !was_failed) {
             final PendingIntent pi = PendingIntent.getActivity(xdrip.getAppContext(), G5_SENSOR_FAILED, JoH.getStartActivityIntent(Home.class), PendingIntent.FLAG_UPDATE_CURRENT);
-            JoH.showNotification(state.getText(), "G5 Sensor FAILED", pi, G5_SENSOR_FAILED, true, true, false);
+            JoH.showNotification(state.getText(), "Sensor FAILED", pi, G5_SENSOR_FAILED, true, true, false);
             UserError.Log.ueh(TAG, "Native Sensor is now marked FAILED: " + state.getExtendedText());
         }
         // we can't easily auto-cancel a failed notice as auto-restart may mean the user is not aware of it?
@@ -1630,7 +1706,7 @@ public class Ob1G5CollectionService extends G5BaseService {
 
     private static void storeCalibrationState(final CalibrationState state) {
         PersistentStore.setByte(OB1G5_STATESTORE, state.getValue());
-        PersistentStore.setLong(OB1G5_STATESTORE_TIME, JoH.tsl());
+        PersistentStore.setLong(OB1G5_STATESTORE_TIME, tsl());
     }
 
     private static CalibrationState getStoredCalibrationState() {
@@ -1717,7 +1793,7 @@ public class Ob1G5CollectionService extends G5BaseService {
     public static void msg(String msg) {
         lastState = msg + " " + JoH.hourMinuteString();
         UserError.Log.d(TAG, "Status: " + lastState);
-        lastStateUpdated = JoH.tsl();
+        lastStateUpdated = tsl();
         if (android_wear && wear_broadcast) {
             BroadcastGlucose.sendLocalBroadcast(null);
         }
@@ -1752,17 +1828,48 @@ public class Ob1G5CollectionService extends G5BaseService {
         }
     }
 
+    private static final String PREF_PURDAH = "ob1g5-purdah-time";
+
+    private boolean requiresPurdah() {
+        return false;
+    }
+
+    private boolean inPurdah() {
+        return purdahMs() > 0;
+    }
+
+    private long purdahMs() {
+        final long purdahTime = PersistentStore.getLong(PREF_PURDAH);
+        final long purdahMs = JoH.msTill(purdahTime);
+        if (purdahMs < 0 || purdahMs > Constants.HOUR_IN_MS * 4) {
+            return 0;
+        }
+        return purdahMs;
+    }
+
+    void setPurdah(final long duration) {
+        if (duration > 0) {
+            PersistentStore.setLong(PREF_PURDAH, tsl() + duration);
+        }
+    }
+
     // data for MegaStatus
     public static List<StatusItem> megaStatus() {
 
         init_tx_id(); // needed if we have not passed through local INIT state
 
+        last_mega_status_read = JoH.tsl();
+
         final List<StatusItem> l = new ArrayList<>();
 
-        l.add(new StatusItem("Phone Service State", lastState, JoH.msSince(lastStateUpdated) < 300000 ? (lastState.startsWith("Got data") ? Highlight.GOOD : NORMAL) : (isWatchRunning() ? Highlight.GOOD : CRITICAL)));
+        if (!DexSyncKeeper.isReady(transmitterID)) {
+            l.add(new StatusItem("Hunting Transmitter", "Stay on this page", CRITICAL));
+        }
+
+        l.add(new StatusItem("Phone Service State", lastState + (BlueJayEntry.isPhoneCollectorDisabled() ? "\nDisabled by BlueJay option" : ""), JoH.msSince(lastStateUpdated) < 300000 ? (lastState.startsWith("Got data") ? Highlight.GOOD : NORMAL) : (isWatchRunning() ? Highlight.GOOD : CRITICAL)));
         if (last_scan_started > 0) {
             final long scanning_time = JoH.msSince(last_scan_started);
-            l.add(new StatusItem("Time scanning", JoH.niceTimeScalar(scanning_time), scanning_time > Constants.MINUTE_IN_MS * 5 ? (scanning_time > Constants.MINUTE_IN_MS * 10 ? BAD : NOTICE) : NORMAL));
+            l.add(new StatusItem("Time scanning", niceTimeScalar(scanning_time), scanning_time > Constants.MINUTE_IN_MS * 5 ? (scanning_time > Constants.MINUTE_IN_MS * 10 ? BAD : NOTICE) : NORMAL));
         }
         if (lastScanError != null) {
             l.add(new StatusItem("Scan Error", lastScanError, BAD));
@@ -1784,7 +1891,7 @@ public class Ob1G5CollectionService extends G5BaseService {
         }
 
         if (static_last_connected > 0) {
-            l.add(new StatusItem("Last Connected", JoH.niceTimeScalar(JoH.msSince(static_last_connected)) + " ago"));
+            l.add(new StatusItem("Last Connected", niceTimeScalar(JoH.msSince(static_last_connected)) + " ago"));
         }
 
         if ((!lastState.startsWith("Service Stopped")) && (!lastState.startsWith("Not running")))
@@ -1792,7 +1899,7 @@ public class Ob1G5CollectionService extends G5BaseService {
 
         if (lastUsableGlucosePacketTime != 0) {
             if (JoH.msSince(lastUsableGlucosePacketTime) < Constants.MINUTE_IN_MS * 15) {
-                l.add(new StatusItem("G5 Algorithm", "Data Received " + JoH.hourMinuteString(lastUsableGlucosePacketTime), Highlight.GOOD));
+                l.add(new StatusItem("Native Algorithm", "Data Received " + JoH.hourMinuteString(lastUsableGlucosePacketTime), Highlight.GOOD));
             }
         }
 
@@ -1802,7 +1909,7 @@ public class Ob1G5CollectionService extends G5BaseService {
         }
 
         if (max_wakeup_jitter > 5000) {
-            l.add(new StatusItem("Slowest Wakeup ", JoH.niceTimeScalar(max_wakeup_jitter), max_wakeup_jitter > Constants.SECOND_IN_MS * 10 ? CRITICAL : NOTICE));
+            l.add(new StatusItem("Slowest Wakeup ", niceTimeScalar(max_wakeup_jitter), max_wakeup_jitter > Constants.SECOND_IN_MS * 10 ? CRITICAL : NOTICE));
         }
 
         if (JoH.buggy_samsung) {
@@ -1825,7 +1932,7 @@ public class Ob1G5CollectionService extends G5BaseService {
             }
         }
 
-        l.add(new StatusItem("Preemptive restarts",
+        l.add(new StatusItem("Preemptive restarts", !FirmwareCapability.isTransmitterPreemptiveRestartCapable(getTransmitterID()) ? "Not capable" :
                 (Pref.getBooleanDefaultFalse("ob1_g5_preemptive_restart") ? "Enabled" : "Disabled")
                         + (Ob1G5StateMachine.useExtendedTimeTravel() ? " (extended)" : "")));
 
@@ -1871,7 +1978,7 @@ public class Ob1G5CollectionService extends G5BaseService {
                     }
                     l.add(new StatusItem("Other Version", vr.other_firmware_version));
                     //  l.add(new StatusItem("Hardware Version", vr.hardwarev));
-                    if (vr.asic != 61440 && vr.asic != 16705 && vr.asic != 243 && vr.asic != 74)
+                    if (vr.asic != 61440 && vr.asic != 16705 && vr.asic != 243 && vr.asic != 74 && vr.asic != 226)
                         l.add(new StatusItem("ASIC", vr.asic, NOTICE));
                 }
             }
@@ -1919,9 +2026,11 @@ public class Ob1G5CollectionService extends G5BaseService {
             l.add(new StatusItem("Transmitter Days", ((bt.runtime > -1) ? bt.runtime : "") + ((timekeeperDays > -1) ? ((FirmwareCapability.isTransmitterG6Rev2(tx_id) ? " " : " / ") + timekeeperDays) : "") + ((last_transmitter_timestamp > 0) ? " / " + JoH.qs((double) last_transmitter_timestamp / 86400, 1) : "")));
             l.add(new StatusItem("Voltage A", bt.voltagea, bt.voltagea < LOW_BATTERY_WARNING_LEVEL ? BAD : NORMAL));
             l.add(new StatusItem("Voltage B", bt.voltageb, bt.voltageb < (LOW_BATTERY_WARNING_LEVEL - 10) ? BAD : NORMAL));
-            l.add(new StatusItem("Resistance", bt.resist, bt.resist > 1400 ? BAD : (bt.resist > 1000 ? NOTICE : (bt.resist > 750 ? NORMAL : Highlight.GOOD))));
-            if (vr != null && !FirmwareCapability.isG6Rev2(vr.firmware_version_string)) {
+            if (vr != null && FirmwareCapability.isFirmwareTemperatureCapable(vr.firmware_version_string)) {
                 l.add(new StatusItem("Temperature", bt.temperature + " \u2103"));
+            }
+            if (bt.resist !=0) {
+                l.add(new StatusItem("Resistance", bt.resist, bt.resist > 1400 ? BAD : (bt.resist > 1000 ? NOTICE : (bt.resist > 750 ? NORMAL : Highlight.GOOD))));
             }
         }
 

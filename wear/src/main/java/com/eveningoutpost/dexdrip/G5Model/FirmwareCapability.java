@@ -23,7 +23,8 @@ public class FirmwareCapability {
                 || KNOWN_G6_PLUS_FIRMWARES.contains(version)
                 || version.startsWith("1.6.5.")
                 || version.startsWith("2.18.")
-                || version.startsWith("2.4."));
+                || version.startsWith("2.4.")
+                || version.startsWith("2.27."));
     }
 
     public static boolean isG6Rev2(final String version) {
@@ -43,7 +44,7 @@ public class FirmwareCapability {
     }
 
     public static boolean isFirmwareTemperatureCapable(final String version) {
-        return !isG6Rev2(version) && !isG6Plus(version);
+        return !isG6Plus(version);
     }
 
     private static boolean isFirmwarePredictiveCapable(final String version) {

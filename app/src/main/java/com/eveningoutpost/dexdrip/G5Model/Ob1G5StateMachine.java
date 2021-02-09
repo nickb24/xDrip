@@ -247,7 +247,7 @@ public class Ob1G5StateMachine {
                 if (status.isAuthenticated()) {
 
                     if (parent.unBondAndStop) {
-                        UserError.Log.d(TAG,"Processing unbond and stop");
+                        UserError.Log.d(TAG, "Processing unbond and stop");
                         parent.changeState(Ob1G5CollectionService.STATE.UNBOND);
 
                     } else {
@@ -384,8 +384,8 @@ public class Ob1G5StateMachine {
     private static void localUnbondAndStop(final Ob1G5CollectionService parent, RxBleConnection connection) {
         Inevitable.task("local unbond", 3000, () -> {
             parent.unBond(); // remove local bond
-            Inevitable.task("shutdown collector",2000, () -> {
-                UserError.Log.d(TAG,"Shutting down collector");
+            Inevitable.task("shutdown collector", 2000, () -> {
+                UserError.Log.d(TAG, "Shutting down collector");
                 DexCollectionType.setDexCollectionType(DexCollectionType.Disabled);
                 CollectionServiceStarter.restartCollectionServiceBackground();
                 parent.unBondAndStop = false;
@@ -1352,11 +1352,11 @@ public class Ob1G5StateMachine {
     private static int requiredNextFirmwareDetailsType() {
         final String txid = getTransmitterID();
         if (txid.length() == 6) {
-            final byte[] v1b =  getStoredFirmwareBytes(txid,1);
+            final byte[] v1b = getStoredFirmwareBytes(txid, 1);
             if (v1b.length < 10) return 1;
-            final byte[] v0b =  getStoredFirmwareBytes(txid,0);
+            final byte[] v0b = getStoredFirmwareBytes(txid, 0);
             if (v0b.length < 10) return 0;
-            final byte[] v2b =  getStoredFirmwareBytes(txid,2);
+            final byte[] v2b = getStoredFirmwareBytes(txid, 2);
             if (v2b.length < 10) return 2;
         }
         return -1; // nothing required
@@ -1457,7 +1457,7 @@ public class Ob1G5StateMachine {
             return null;
         }
         try {
-            byte[] stored = getStoredFirmwareBytes(tx_id,type);
+            byte[] stored = getStoredFirmwareBytes(tx_id, type);
             if ((stored != null) && (stored.length > 9)) {
                 switch (type) {
                     case 1:
@@ -1480,7 +1480,7 @@ public class Ob1G5StateMachine {
         final VersionRequest1RxMessage vr = getFirmwareDetails(tx_id);
         if (vr != null) {
             if (vr.firmware_version_string == null) {
-                UserError.Log.d(TAG,"Clearing firmware version as evaluated to null");
+                UserError.Log.d(TAG, "Clearing firmware version as evaluated to null");
                 setStoredFirmwareBytes(tx_id, new byte[0], false);
                 return "error";
             }
@@ -1670,11 +1670,11 @@ public class Ob1G5StateMachine {
     }
 
     private static boolean getEGlucose() {
-       // if (android_wear) {
-            return usingG6() && Pref.getBooleanDefaultFalse("show_g_prediction");
-      //  } else {
-     //       return usingG6();
-      //  }
+        // if (android_wear) {
+        return usingG6() && Pref.getBooleanDefaultFalse("show_g_prediction");
+        //  } else {
+        //       return usingG6();
+        //  }
     }
 
     public static boolean usingAlt() {
