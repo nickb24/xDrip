@@ -1860,19 +1860,15 @@ public class Ob1G5CollectionService extends G5BaseService {
             builder.append(state.getString());
             return new SpannableString(builder);
         } else {
-            if (usingNativeMode()) {
-                if (lastSensorState != null && lastSensorState != CalibrationState.Ok) {
-                    if (!lastSensorState.sensorStarted() && isPendingStart()) {
-                        return Span.colorSpan("Starting Sensor", NOTICE.color());
-                    } else if (lastSensorState.sensorStarted() && isPendingStop()) {
-                        return Span.colorSpan("Stopping Sensor", NOTICE.color());
-                    } else if (lastSensorState.needsCalibration() && pendingCalibration()) {
-                        return Span.colorSpan("Sending calibration", NOTICE.color());
-                    } else {
-                        return Span.colorSpan(lastSensorState.getExtendedText(), lastSensorState.transitional() ? NOTICE.color() : lastSensorState.sensorFailed() ? CRITICAL.color() : BAD.color());
-                    }
+            if (lastSensorState != null && lastSensorState != CalibrationState.Ok) {
+                if (!lastSensorState.sensorStarted() && isPendingStart()) {
+                    return Span.colorSpan("Starting Sensor", NOTICE.color());
+                } else if (lastSensorState.sensorStarted() && isPendingStop()) {
+                    return Span.colorSpan("Stopping Sensor", NOTICE.color());
+                } else if (lastSensorState.needsCalibration() && pendingCalibration()) {
+                    return Span.colorSpan("Sending calibration", NOTICE.color());
                 } else {
-                    return Span.colorSpan("", NORMAL.color()); // non native blank
+                    return Span.colorSpan(lastSensorState.getExtendedText(), lastSensorState.transitional() ? NOTICE.color() : lastSensorState.sensorFailed() ? CRITICAL.color() : BAD.color());
                 }
             } else {
                 return null;
