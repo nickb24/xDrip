@@ -626,7 +626,7 @@ public class Notifications extends IntentService {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             // in case the graphic crashes the system-ui we wont do it immediately after reboot so the
             // user has a chance to disable the feature
-            if (SystemClock.uptimeMillis() > Constants.MINUTE_IN_MS * 15) {
+            if (SystemClock.uptimeMillis() > Constants.MINUTE_IN_MS * 4) {
                 if (NumberGraphic.numberIconEnabled()) {
                     if ((dg != null) && (!dg.isStale())) {
                         final Bitmap icon_bitmap = NumberGraphic.getSmallIconBitmap(dg.unitized);
