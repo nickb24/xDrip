@@ -67,6 +67,11 @@ public class ScanRecordImplCompatLocal implements ScanRecord {
         return serviceUuids;
     }
 
+    @Override
+    public List<ParcelUuid> getServiceSolicitationUuids() {
+        return null;
+    }
+
     /**
      * Returns a sparse array of manufacturer identifier and its corresponding manufacturer specific
      * data.
