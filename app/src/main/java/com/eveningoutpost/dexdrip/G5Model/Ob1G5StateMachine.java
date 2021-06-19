@@ -73,6 +73,7 @@ import static com.eveningoutpost.dexdrip.Services.G5BaseService.G5_FIRMWARE_MARK
 import static com.eveningoutpost.dexdrip.Services.Ob1G5CollectionService.android_wear;
 import static com.eveningoutpost.dexdrip.Services.Ob1G5CollectionService.getTransmitterID;
 import static com.eveningoutpost.dexdrip.Services.Ob1G5CollectionService.onlyUsingNativeMode;
+import static com.eveningoutpost.dexdrip.Services.Ob1G5CollectionService.resetSomeInternalState;
 import static com.eveningoutpost.dexdrip.Services.Ob1G5CollectionService.wear_broadcast;
 import static com.eveningoutpost.dexdrip.UtilityModels.BgGraphBuilder.DEXCOM_PERIOD;
 import static com.eveningoutpost.dexdrip.UtilityModels.Constants.DAY_IN_MS;
@@ -726,10 +727,22 @@ public class Ob1G5StateMachine {
         return true;
     }
 
+    private static void handleNonSensorRxState(final Ob1G5CollectionService parent, final RxBleConnection connection) {
+        try {
+            checkVersionAndBattery(parent, connection);
+        } finally {
+            parent.msg("Got needed");
+            parent.updateLast(tsl());       // TODO verify if this is ok to do here
+            parent.clearErrors();           // TODO verify if this is ok to do here
+        }
+    }
+
     private static void glucoseRxCommon(final BaseGlucoseRxMessage glucose, final Ob1G5CollectionService parent, final RxBleConnection connection) {
         if (JoH.ratelimit("ob1-g5-also-read-raw", 20)) {
             if (FirmwareCapability.isTransmitterRawCapable(getTransmitterID())) {
                 enqueueUniqueCommand(new SensorTxMessage(), "Also read raw");
+            } else {
+                handleNonSensorRxState(parent, connection);
             }
         }
 
@@ -831,7 +844,7 @@ public class Ob1G5StateMachine {
         }
     }
 
-    private static void enqueueCommand(BaseMessage tm, String msg) {
+    private static Ob1Work enqueueCommand(BaseMessage tm, String msg) {
         if (tm != null) {
             final Ob1Work item = new Ob1Work(tm, msg);
             synchronized (commandQueue) {
@@ -839,7 +852,9 @@ public class Ob1G5StateMachine {
             }
             streamCheck(item);
             backupCheck(item);
+            return item;
         }
+        return null;
     }
 
     private static void streamCheck(Ob1Work item) {
@@ -854,14 +869,14 @@ public class Ob1G5StateMachine {
         }
     }
 
-    private static void enqueueUniqueCommand(BaseMessage tm, String msg) {
+    private static Ob1Work enqueueUniqueCommand(BaseMessage tm, String msg) {
         if (tm != null) {
             final Class searchClass = tm.getClass();
             Ob1Work item;
             synchronized (commandQueue) {
                 if (searchQueue(searchClass)) {
                     UserError.Log.d(TAG, "Not adding duplicate: " + searchClass.getSimpleName());
-                    return;
+                    return null;
                 }
                 item = new Ob1Work(tm, msg);
                 if (d) {
@@ -871,7 +886,9 @@ public class Ob1G5StateMachine {
                 streamCheck(item);
             }
             backupCheck(item);
+            return item;
         }
+        return null;
     }
 
     private static boolean queueContains(BaseMessage tm) {
@@ -931,15 +948,19 @@ public class Ob1G5StateMachine {
     // used in backup restore and wear
     @SuppressWarnings("WeakerAccess")
     public static void injectQueueJson(String json) {
-        if (json == null || json.length() == 0) return;
-        final Type queueType = new TypeToken<ArrayList<Ob1Work>>() {
-        }.getType();
-        final List<Ob1Work> queue = JoH.defaultGsonInstance().fromJson(json, queueType);
-        synchronized (commandQueue) {
-            commandQueue.clear();
-            commandQueue.addAll(queue);
+        try {
+            if (json == null || json.length() == 0) return;
+            final Type queueType = new TypeToken<ArrayList<Ob1Work>>() {
+            }.getType();
+            final List<Ob1Work> queue = JoH.defaultGsonInstance().fromJson(json, queueType);
+            synchronized (commandQueue) {
+                commandQueue.clear();
+                commandQueue.addAll(queue);
+            }
+            UserError.Log.d(TAG, "Replaced queue with stream: " + json);
+        } catch (Exception e) {
+            UserError.Log.d(TAG, "Got error processing queue injection: " + e);
         }
-        UserError.Log.d(TAG, "Replaced queue with stream: " + json);
     }
 
     public static String extractDexTime() {
@@ -1085,6 +1106,30 @@ public class Ob1G5StateMachine {
         }
     }
 
+    private static void postExtension() {
+        Inevitable.task("post-extension", 2000, () -> {
+            DexSyncKeeper.clear(getTransmitterID());
+            clearStoredFirmwareBytes(getTransmitterID());
+            emptyQueue();
+            resetSomeInternalState();
+        });
+    }
+
+    public static void enableExtensionParameter() {
+        if (acceptCommands()) {
+            enqueueUniqueCommand(new ExtensionTxMessage(ExtensionTxMessage.PARAM_ENABLE), "Enable extension")
+                    .setDontRetry()
+                    .setPreWrite(Ob1G5StateMachine::postExtension);
+        }
+    }
+
+    public static void disableExtensionParameter() {
+        if (acceptCommands()) {
+            enqueueUniqueCommand(new ExtensionTxMessage(ExtensionTxMessage.PARAM_DISABLE), "Disable extension")
+                    .setDontRetry()
+                    .setPreWrite(Ob1G5StateMachine::postExtension);
+        }
+    }
 
     public static void restartSensorWithTimeTravel() {
         restartSensorWithTimeTravel(tsl() -
@@ -1093,8 +1138,8 @@ public class Ob1G5StateMachine {
 
     public static boolean useExtendedTimeTravel() {
         return Pref.getBooleanDefaultFalse("ob1_g5_preemptive_restart_extended_time_travel")
-                    && (FirmwareCapability.isTransmitterTimeTravelCapable(getTransmitterID())
-                    || (Pref.getBooleanDefaultFalse("ob1_g5_defer_preemptive_restart_all_firmwares") && Home.get_engineering_mode()));
+                && (FirmwareCapability.isTransmitterTimeTravelCapable(getTransmitterID())
+                || (Pref.getBooleanDefaultFalse("ob1_g5_defer_preemptive_restart_all_firmwares") && Home.get_engineering_mode()));
     }
 
     public static void restartSensorWithTimeTravel(long when) {
@@ -1162,6 +1207,7 @@ public class Ob1G5StateMachine {
                     changed = true;
                     reprocessTxMessage(unit.msg);
                     if (unit.retry < 5 && JoH.msSince(unit.timestamp) < HOUR_IN_MS * 8) {
+                        unit.preWrite();
                         connection.writeCharacteristic(Control, nn(unit.msg.byteSequence))
                                 .timeout(2, TimeUnit.SECONDS)
                                 .subscribe(value -> {
@@ -1172,14 +1218,19 @@ public class Ob1G5StateMachine {
                                         UserError.Log.d(TAG, "Sleeping post execute: " + unit.text + " " + guardTime + "ms");
                                         JoH.threadSleep(guardTime);
                                     }
+                                    unit.postWrite();
                                     throw new OperationSuccess("Completed: " + unit.text);
 
                                 }, throwable -> {
                                     if (!(throwable instanceof OperationSuccess)) {
-                                        unit.retry++;
-                                        UserError.Log.d(TAG, "Re-adding: " + unit.text);
-                                        synchronized (commandQueue) {
-                                            commandQueue.push(unit);
+                                        if (!unit.dontRetry) {
+                                            unit.retry++;
+                                            UserError.Log.d(TAG, "Re-adding: " + unit.text);
+                                            synchronized (commandQueue) {
+                                                commandQueue.push(unit);
+                                            }
+                                        } else {
+                                            UserError.Log.d(TAG, "Not re-adding " + unit.text);
                                         }
                                         UserError.Log.d(TAG, "Failure: " + unit.text + " " + JoH.dateTimeText(tsl()));
                                         if (throwable instanceof BleDisconnectedException) {
@@ -1418,6 +1469,11 @@ public class Ob1G5StateMachine {
         return true;
     }
 
+    public static void clearStoredFirmwareBytes(String transmitterId) {
+        for (int type = 1; type < 3; type++) {
+            PersistentStore.removeItem(G5_FIRMWARE_MARKER + transmitterId + "-" + type);
+        }
+    }
 
     public synchronized static boolean setStoredBatteryBytes(String transmitterId, byte[] data) {
         UserError.Log.e(TAG, "Store: BatteryRX dbg: " + JoH.bytesToHex(data));
