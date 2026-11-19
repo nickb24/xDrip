@@ -346,12 +346,12 @@
                 <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
             </intent-filter>
         </receiver>
-        <receiver android:name=".utils.HeadsetStateReceiver">
+<!--        <receiver android:name=".utils.HeadsetStateReceiver">
             <intent-filter>
                 <action android:name="android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.headset.profile.action.AUDIO_STATE_CHANGED" />
             </intent-filter>
-        </receiver>
+        </receiver>-->
         <receiver
             android:name=".wearintegration.ExternalStatusBroadcastReceiver" android:exported="true">
             <intent-filter>

@@ -83,6 +83,9 @@ public class VoiceCommands {
         } else if (allWords.contentEquals("clear transmitter queue")) {
             Ob1G5StateMachine.emptyQueue();
             JoH.static_toast_long("Clearing transmitter command queue");
+        } else if (allWords.contentEquals("clear g7 store")) {
+            Ob1G5CollectionService.clearPersistStore();
+            JoH.static_toast_long("Clearing G7 persistent store");
         } else if (allWords.contentEquals("reset heart rate sync")) {
             PersistentStore.setLong("nightscout-rest-heartrate-synced-time", 0);
             JoH.static_toast_long("Cleared heart rate sync data");
