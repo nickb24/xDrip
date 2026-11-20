@@ -65,7 +65,7 @@ public class SensorExpiry extends BaseAlert {
     private static void showExpiryNotification(final String message) {
         val notificationId = SENSORY_EXPIRY_NOTIFICATION_ID;
         cancelNotification(notificationId);
-        showNotification(xdrip.gs(R.string.sensor_expiring), message, null, notificationId, GENERAL_CHANNEL, true, true, null, null, null, true);
+        showNotification(xdrip.gs(R.string.sensor_expiring), message, null, notificationId, GENERAL_CHANNEL, false, true, null, null, null, true);
     }
 
     /**
